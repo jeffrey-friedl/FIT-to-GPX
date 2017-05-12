@@ -1,0 +1,425 @@
+#!/usr/bin/perl -w
+use strict;
+use DateTime;
+
+##
+## This simple script converts a FIT file to a GPX file suitable for upload
+## to Strava. (Note on what Strava accepts: https://strava.github.io/api/v3/uploads/ )
+##
+## It requires the Java "FitCSVTool" included within the free FIT SDK,
+## available from https://www.thisisant.com/resources/fit/
+## (The download link is on https://www.thisisant.com/developer/resources/downloads/ )
+##
+
+## Update this command-line string to point to where you've placed the SDK's FitCSVTool.jar file,
+## and to invoke Java as you like.
+my $JAVA_FITCSV_CMD = qq{  java -jar '/Users/jfriedl/src/FitSDKRelease_20.30.00/java/FitCSVTool.jar'  };
+
+##
+## Usage (after configuring above)
+##
+##   fit2gpx [-baro] file.fit > file.gpx
+##
+## The -baro option adds the text "with barometer" to the GPX creator
+## field, which matically tells Strava not to ignore the file's elevation
+## data. See https://strava.github.io/api/v3/uploads/#device-and-elevation-data
+##
+
+
+
+##########################################################################################
+
+# options set from ARGV
+my $WithBarometer = 0; # if true, append "with barometer" to the GPX creator field
+
+
+
+#
+# Product ID codes come from "c/fit_example.h" in the FIT SDK download.
+#
+# These are used in populating the GPX "creator" field, and are not really
+# required, but it's nice if possible. Strava will display certain units'
+# names if recognized.
+#
+# It's also interesting to see that units that appear to be the same model
+# can actually be region specific. For example, there are actually four
+# distinct models of "Garmin Forerunner 920XT" (Japan/China/Taiwan/Other),
+# and firmware for one can't be used for the others. I've heard that
+# firmware for the region-specific units (e.g. Japan) can lag years behind
+# firmware for USA/Europe-based models.
+#
+my @ID;
+$ID[1]    = "Garmin HRM1";
+$ID[2]    = "Garmin AXH01";
+$ID[3]    = "Garmin AXB01";
+$ID[4]    = "Garmin AXB02";
+$ID[5]    = "Garmin HRM2SS";
+$ID[6]    = "Garmin DSI_ALF02";
+$ID[7]    = "Garmin HRM3SS";
+$ID[8]    = "Garmin HRM RUN";
+$ID[9]    = "Garmin BSM ";
+$ID[10]   = "Garmin BCM";
+$ID[11]   = "Garmin AXS01";
+$ID[12]   = "Garmin HRM TRI";
+$ID[14]   = "Garmin Forerunner 225";
+$ID[473]  = "Garmin Forerunner 301 (China)";
+$ID[474]  = "Garmin Forerunner 301 (Japan)";
+$ID[475]  = "Garmin Forerunner 301 (Korea)";
+$ID[494]  = "Garmin Forerunner 301 (Taiwan)";
+$ID[717]  = "Garmin Forerunner 405";
+$ID[782]  = "Garmin Forerunner 50";
+$ID[987]  = "Garmin Forerunner 405 (Japan)";
+$ID[988]  = "Garmin Forerunner 60";
+$ID[1011]  = "Garmin DSI_ALF01";
+$ID[1018]  = "Garmin Forerunner 310XT";
+$ID[1036]  = "Garmin Edge 500";
+$ID[1124]  = "Garmin Forerunner 110";
+$ID[1169]  = "Garmin Edge 800";
+$ID[1199]  = "Garmin Edge 500 (Taiwan)";
+$ID[1213]  = "Garmin Edge 500 (Japan)";
+$ID[1253]  = "Garmin CHIRP";
+$ID[1274]  = "Garmin Forerunner 110 (Japan)";
+$ID[1325]  = "Garmin Edge 200";
+$ID[1328]  = "Garmin Forerunner 910XT";
+$ID[1333]  = "Garmin Edge 800 (Taiwan)";
+$ID[1334]  = "Garmin Edge 800 (Japan)";
+$ID[1341]  = "Garmin ALF04";
+$ID[1345]  = "Garmin Forerunner 610";
+$ID[1360]  = "Garmin Forerunner 210 (Japan)";
+$ID[1380]  = "Garmin VECTOR_SS";
+$ID[1381]  = "Garmin VECTOR_CP";
+$ID[1386]  = "Garmin Edge 800 (China)";
+$ID[1387]  = "Garmin Edge 500 (China)";
+$ID[1410]  = "Garmin Forerunner 610 (Japan)";
+$ID[1422]  = "Garmin Edge 500 (Korea)";
+$ID[1436]  = "Garmin Forerunner 70";
+$ID[1446]  = "Garmin Forerunner 310XT 4T";
+$ID[1461]  = "Garmin AMX";
+$ID[1482]  = "Garmin Forerunner 10";
+$ID[1497]  = "Garmin Edge 800 (Korea)";
+$ID[1499]  = "Garmin SWIM";
+$ID[1537]  = "Garmin Forerunner 910XT (China)";
+$ID[1551]  = "Garmin Fenix";
+$ID[1555]  = "Garmin Edge 200 (Taiwan)";
+$ID[1561]  = "Garmin Edge 510";
+$ID[1567]  = "Garmin Edge 810";
+$ID[1570]  = "Garmin Tempe";
+$ID[1600]  = "Garmin Forerunner 910XT (Japan)";
+$ID[1623]  = "Garmin Forerunner 620";
+$ID[1632]  = "Garmin Forerunner 220";
+$ID[1664]  = "Garmin Forerunner 910XT (Korea)";
+$ID[1688]  = "Garmin Forerunner 10 (Japan)";
+$ID[1721]  = "Garmin Edge 810 (Japan)";
+$ID[1735]  = "Garmin Virb Elite";
+$ID[1736]  = "Garmin Edge Touring";
+$ID[1742]  = "Garmin Edge 510 (Japan)";
+$ID[1743]  = "Garmin HRM_TRI";
+$ID[1752]  = "Garmin HRM_RUN";
+$ID[1765]  = "Garmin Forerunner 920XT";
+$ID[1821]  = "Garmin Edge 510 (Asia)";
+$ID[1822]  = "Garmin Edge 810 (China)";
+$ID[1823]  = "Garmin Edge 810 (Taiwan)";
+$ID[1836]  = "Garmin Edge 1000";
+$ID[1837]  = "Garmin Vivo Fit";
+$ID[1853]  = "Garmin Virb Remote";
+$ID[1885]  = "Garmin Vivo Ki";
+$ID[1903]  = "Garmin Forerunner 15";
+$ID[1907]  = "Garmin Vivo Active";
+$ID[1918]  = "Garmin Edge 510 (Korea)";
+$ID[1928]  = "Garmin Forerunner 620 (Japan)";
+$ID[1929]  = "Garmin Forerunner 620 (China)";
+$ID[1930]  = "Garmin Forerunner 220 (Japan)";
+$ID[1931]  = "Garmin Forerunner 220 (China)";
+$ID[1936]  = "Garmin APPROACH_S6";
+$ID[1956]  = "Garmin Vivo Smart";
+$ID[1967]  = "Garmin FENIX2";
+$ID[1988]  = "Garmin EPIX";
+$ID[2050]  = "Garmin FENIX3";
+$ID[2052]  = "Garmin Edge 1000 (Taiwan)";
+$ID[2053]  = "Garmin Edge 1000 (Japan)";
+$ID[2061]  = "Garmin Forerunner 15 (Japan)";
+$ID[2067]  = "Garmin Edge 520";
+$ID[2070]  = "Garmin Edge 1000 (China)";
+$ID[2072]  = "Garmin Forerunner 620 (Russia)";
+$ID[2073]  = "Garmin Forerunner 220 (Russia)";
+$ID[2079]  = "Garmin VECTOR_S";
+$ID[2100]  = "Garmin Edge 1000 (Korea)";
+$ID[2130]  = "Garmin Forerunner 920XT (Taiwan)";
+$ID[2131]  = "Garmin Forerunner 920XT (China)";
+$ID[2132]  = "Garmin Forerunner 920XT (Japan)";
+$ID[2134]  = "Garmin VIRBX";
+$ID[2135]  = "Garmin VIVO_SMART_APAC";
+$ID[2140]  = "Garmin eTrex Touch";
+$ID[2147]  = "Garmin Edge 25";
+$ID[2148]  = "Garmin Forerunner 25";
+$ID[2150]  = "Garmin Vivo Fit2";
+$ID[2153]  = "Garmin Forerunner 225";
+$ID[2156]  = "Garmin Forerunner 630";
+$ID[2157]  = "Garmin Forerunner 230";
+$ID[2160]  = "Garmin VIVO_ACTIVE_APAC";
+$ID[2161]  = "Garmin VECTOR_2";
+$ID[2162]  = "Garmin VECTOR_2S";
+$ID[2172]  = "Garmin VIRBXE";
+$ID[2173]  = "Garmin Forerunner 620 (Taiwan)";
+$ID[2174]  = "Garmin Forerunner 220 (Taiwan)";
+$ID[2175]  = "Garmin TRUSWING";
+$ID[2188]  = "Garmin FENIX3 (China)";
+$ID[2189]  = "Garmin FENIX3_TWN";
+$ID[2192]  = "Garmin VARIA_HEADLIGHT";
+$ID[2193]  = "Garmin VARIA_TAILLIGHT_OLD";
+$ID[2204]  = "Garmin Edge _EXPLORE_1000";
+$ID[2219]  = "Garmin Forerunner 225 (Asia)";
+$ID[2225]  = "Garmin VARIA_RADAR_TAILLIGHT";
+$ID[2226]  = "Garmin VARIA_RADAR_DISPLAY";
+$ID[2238]  = "Garmin Edge 20";
+$ID[2262]  = "Garmin D2_BRAVO";
+$ID[2266]  = "Garmin APPROACH_S20";
+$ID[2276]  = "Garmin VARIA_REMOTE";
+$ID[2327]  = "Garmin HRM4_RUN";
+$ID[2337]  = "Garmin VIVO_ACTIVE_HR";
+$ID[2347]  = "Garmin VIVO_SMART_GPS_HR";
+$ID[2348]  = "Garmin VIVO_SMART_HR";
+$ID[2368]  = "Garmin VIVO_MOVE";
+$ID[2398]  = "Garmin VARIA_VISION";
+$ID[2406]  = "Garmin VIVO_FIT3";
+$ID[2413]  = "Garmin FENIX3_HR";
+$ID[2417]  = "Garmin VIRB_ULTRA_30";
+$ID[2429]  = "Garmin INDEX_SMART_SCALE";
+$ID[2431]  = "Garmin Forerunner 235";
+$ID[2432]  = "Garmin FENIX3_CHRONOS";
+$ID[2441]  = "Garmin OREGON7XX";
+$ID[2444]  = "Garmin RINO7XX";
+$ID[2496]  = "Garmin NAUTIX";
+$ID[2530]  = "Garmin Edge 820";
+$ID[2531]  = "Garmin Edge Explore 820";
+$ID[2544]  = "Garmin FENIX5S";
+$ID[2547]  = "Garmin D2_BRAVO_TITANIUM";
+$ID[2593]  = "Garmin RUNNING_DYNAMICS_POD";
+$ID[2604]  = "Garmin FENIX5X";
+$ID[2606]  = "Garmin VIVO_FIT_JR";
+$ID[2691]  = "Garmin Forerunner 935";
+$ID[2697]  = "Garmin FENIX5";
+$ID[10007]  = "Garmin SDM4 footpod";
+$ID[10014]  = "Garmin Edge REMOTE";
+$ID[20119]  = "Garmin TRAINING_CENTER";
+$ID[65531]  = "Garmin CONNECTIQ_SIMULATOR";
+$ID[65532]  = "Garmin ANDROID_ANTPLUS_PLUGIN";
+$ID[65534]  = "Garmin Connect website";
+
+
+sub FitTimestampToGpxTimeString($)
+{
+    my $FIT_Timestamp = shift;
+    my $Unix_Timestamp = $FIT_Timestamp + 631065600; # shift to Unix epoch from FIT epoch of 00:00 Dec 31 1989 UTC
+
+    ## produce the timestamp string in a format required by the GPX standard, down to three digits of fractional seconds
+    my $GPX_Timestamp = DateTime->from_epoch( epoch => $Unix_Timestamp )->format_cldr("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+
+    # If there are no fracitonal secionds (e.g. ".000") get rid of the ".000" to make it look cleaner.
+    $GPX_Timestamp =~ s/\.000Z/Z/;
+
+    return $GPX_Timestamp;
+}
+
+my $SEMICIRCLE_TO_DEGREE_RATIO = 180/(2**31);
+
+sub SemicircleToDegree($)
+{
+    my $semicircles = shift;
+    my $degree = $semicircles * $SEMICIRCLE_TO_DEGREE_RATIO;
+    return sprintf("%.7f", $degree);
+}
+
+
+
+# The SDK's Java "FitCSVTool" produces CSV lines with a bunch of key-value-unit tuples
+# e.g:   heart_rate,"165",bpm.
+#
+# Given such a line, return a hash such that $hash{heart_rate} returns
+# "165".
+#
+# Units are ignored... I assume they're always the same for any given key.
+
+sub DataLineToHash($)
+{
+    my $line = shift;
+    my %hash;
+    while ($line =~ m/([^,]*),"([^"]*)",([^,]*)/g) {
+        my ($key, $val, $units) = ($1, $2, $3);
+        if ($key ne "unknown") {
+            $hash{$key} = $val;
+        }
+    }
+    return %hash;
+}
+
+
+#
+# Given a numeric value, return it as a string to one fractional decimal place,
+# unless the fractional part is ".0" in which case omit it.
+#
+# If passed undef, return undef.
+#
+sub NullOrOneDecimalPlace($)
+{
+    my $val = shift;
+    return if not defined $val;
+    my $new = sprintf("%.1f", $val);
+    $new =~ s/\.0$//;
+    return $new;
+}
+
+
+my $DeviceName; # we'll cache the device name here if we run across it.
+
+#
+# Example line (before the first three fields are stripped):
+#   Data,0,file_id,serial_number,"3929886743",,time_created,"863390331",,manufacturer,"1",,garmin_product,"2530",,type,"4",,,,,,,,
+# The garmin_product of 2530 is a Garmin Edge 820.
+#
+sub doFileId($)
+{
+    my $line = shift;
+    my %D = DataLineToHash($line);
+    if ($D{garmin_product}) {
+        $DeviceName = ($ID[$D{garmin_product}] or "garmin product")
+    }
+}
+
+
+my $HeaderDumped = 0;
+
+sub DumpHeader()
+{
+    if (not $HeaderDumped) {
+        $HeaderDumped = 1;
+        $DeviceName ||= "Unknown device";
+
+        if ($WithBarometer) {
+            $DeviceName ||= " with barometer"; # If this is included in the device name, Strava uses the elevation from the file instead of
+                                               # using their often-ridiculous elevation database.
+        }
+
+        print qq{<?xml version="1.0" encoding="UTF-8"?>
+<gpx creator="$DeviceName" version="1.1" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 http://www.garmin.com/xmlschemas/GpxExtensionsv3.xsd http://www.garmin.com/xmlschemas/TrackPointExtension/v1 http://www.garmin.com/xmlschemas/TrackPointExtensionv1.xsd" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1" xmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"><trk><trkseg>\n};
+    }
+}
+
+sub DumpFooter()
+{
+    if ($HeaderDumped) {
+        print "</trkseg></trk></gpx>\n";
+    }
+}
+
+#
+# Process a "record" Data line, after the initial "Data,15,record," has been stripped.
+#
+# Here's an example line (prior to the initial part being stripped):
+#
+# Data,0,record,timestamp,"863395929",s,position_lat,"415277478",semicircles,position_long,"1619782498",semicircles,distance,"31717.63",m,accumulated_power,"809372",watts,altitude,"41.200000000000045",m,speed,"13.837",m/s,power,"808",watts,unknown,"2626",,unknown,"-2",,heart_rate,"118",bpm,cadence,"92",rpm,temperature,"23",C,left_right_balance,"177",,left_torque_effectiveness,"93.0",percent,right_torque_effectiveness,"91.0",percent,left_pedal_smoothness,"26.5",percent,right_pedal_smoothness,"21.5",percent,fractional_cadence,"0.0",rpm,enhanced_altitude,"41.200000000000045",m,enhanced_speed,"13.837",m/s,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+#
+# Record lines can have a wide variety of fields, but we look for only the few needed for a Strava GPX upload.
+#
+sub doRecord($)
+{
+    my $line = shift; # line of tuples
+    my %DATA = DataLineToHash($line);
+
+    return if not $DATA{timestamp} or not $DATA{position_long} or not $DATA{position_lat};
+
+    # these are required
+    my $time = FitTimestampToGpxTimeString($DATA{timestamp});
+    my $lat  = SemicircleToDegree($DATA{position_lat});
+    my $lon  = SemicircleToDegree($DATA{position_long});
+
+    # these are optional
+    my $ele     = NullOrOneDecimalPlace($DATA{altitude});
+    my $power   = $DATA{power};       # may be undef
+    my $HR      = $DATA{heart_rate};  # may be undef
+    my $cadence = $DATA{cadence};     # may be undef
+    my $temp    = $DATA{temperature}; # may be undef
+
+    # build up the textual parts of a <trkpt> record....
+    my @PT = qq{<trkpt lat="$lat" lon="$lon"><time>$time</time>};
+
+    if (defined($power) or defined($HR) or defined($cadence) or defined($temp))
+    {
+        push @PT, "<extensions>";
+
+        if (defined($HR) or defined($cadence) or defined($temp)) {
+            push @PT, "<gpxtpx:TrackPointExtension>";
+            push @PT, "<gpxtpx:atemp>$temp</gpxtpx:atemp>" if defined $temp;
+            push @PT, "<gpxtpx:hr>$HR</gpxtpx:hr>"         if defined $HR;
+            push @PT, "<gpxtpx:cad>$cadence</gpxtpx:cad>"  if defined $cadence;
+            push @PT, "</gpxtpx:TrackPointExtension>";
+        }
+
+        if (defined $power) {
+            push @PT, "<power>$power</power>";  # this is a Strava extension as per https://strava.github.io/api/v3/uploads/
+        }
+        push @PT, "</extensions>";
+    }
+    push @PT, "<ele>$ele</ele>" if defined $ele;
+    push @PT, "</trkpt>";
+
+    DumpHeader(); # we have a datapoint, so dump the header (will be a no-op if we've dumped it already)
+
+    print join('', @PT), "\n";
+}
+    
+sub Usage()
+{
+    die "Usage: $0 [-baro] file.fit\n";
+}
+
+while (@ARGV and $ARGV[0] =~ m/^-/) {
+    my $arg = shift @ARGV;
+    if ($arg eq '-baro') {
+        $WithBarometer = 1;
+    } else {
+        warn "$0: unknown arg [$arg]\n";
+        Usage();
+    }
+}
+
+Usage() if @ARGV != 1;
+my $FIT = shift @ARGV;
+
+die "$0: fit file [$FIT] not found\n" if not -f $FIT;
+
+my $TMP = "/tmp/from-fit.csv"; # I write to this static name, and leave it around, for debugging and to check out the raw data
+unlink($TMP); # just in case
+system("$JAVA_FITCSV_CMD -b '$FIT' '$TMP' > /dev/null");
+die "$0: the SDK's java command didn't produce a CSV file\n" if not -f $TMP;
+
+open IN, "<$TMP" or die "$0: couldn't write temporary file [$TMP]: $!\n";
+
+while (<IN>)
+{
+    #
+    # Process a "record" Data line, such as:
+    #
+    #    Data,15,record,timestamp,"863390397",s,position_lat,"417706898",semicircles,position_long,"1619937141",semicircles,distance,"61.51",m,accumulated_power,"0",watts,altitude,"28.399999999999977",m,speed,"0.0",m/s,power,"0",watts,unknown,"2647",,unknown,"202",,heart_rate,"68",bpm,cadence,"0",rpm,temperature,"24",C,fractional_cadence,"0.0",rpm,enhanced_altitude,"28.399999999999977",m,enhanced_speed,"0.0",m/s,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+    if (s/^Data,\d+,record,//) {
+        doRecord($_);
+    }
+
+    #
+    # Process a "file_id" Data line, such as:
+    #
+    #     Data,0,file_id,serial_number,"3929886743",,time_created,"863390331",,manufacturer,"1",,garmin_product,"2530",,type,"4",,,,,,,,
+    elsif (s/^Data,0,file_id,//) {
+        doFileId($_);
+    }
+
+    else
+    {
+        # ignore all other lines
+    }
+}
+
+DumpFooter();
+close(IN);
+
+__END__
