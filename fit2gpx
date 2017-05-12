@@ -1,6 +1,7 @@
 #!/usr/bin/perl -w
 use strict;
 use DateTime;
+use File::Temp;
 
 ##
 ## This simple script converts a FIT file to a GPX file suitable for upload
@@ -10,6 +11,8 @@ use DateTime;
 ## available from https://www.thisisant.com/resources/fit/
 ## (The download link is on https://www.thisisant.com/developer/resources/downloads/ )
 ##
+## This works with whatever FIT files the SDK script works with.
+## As of May 2017, it works with FIT versions 1 and 2.
 
 ## Update this command-line string to point to where you've placed the SDK's FitCSVTool.jar file,
 ## and to invoke Java as you like.
@@ -385,17 +388,19 @@ while (@ARGV and $ARGV[0] =~ m/^-/) {
 
 Usage() if @ARGV != 1;
 my $FIT = shift @ARGV;
-
 die "$0: fit file [$FIT] not found\n" if not -f $FIT;
 
-my $TMP = "/tmp/from-fit.csv"; # I write to this static name, and leave it around, for debugging and to check out the raw data
+my $TMP = File::Temp::tmpnam() . ".csv"; # the java program will add ".csv" if it's not there, so we make sure it's there
 unlink($TMP); # just in case
-system("$JAVA_FITCSV_CMD -b '$FIT' '$TMP' > /dev/null");
-die "$0: the SDK's java command didn't produce a CSV file\n" if not -f $TMP;
 
-open IN, "<$TMP" or die "$0: couldn't write temporary file [$TMP]: $!\n";
+# need to redirect STDOUT to /dev/null because the java program offers no way to surpress its superflous messages
+my $CMD = "$JAVA_FITCSV_CMD -b '$FIT' '$TMP' --defn none > /dev/null";
+system($CMD);
+die "$0: the SDK's java command didn't produce CSV file [$TMP]\n" if not -f $TMP;
 
-while (<IN>)
+open CSV, "<$TMP" or die "$0: couldn't read temporary file [$TMP]: $!\n";
+
+while (<CSV>)
 {
     #
     # Process a "record" Data line, such as:
@@ -420,6 +425,7 @@ while (<IN>)
 }
 
 DumpFooter();
-close(IN);
+close(CSV);
+unlink($TMP);
 
 __END__
